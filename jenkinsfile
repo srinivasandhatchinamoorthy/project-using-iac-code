@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/srinivasandhatchinamoorthy/project-using-iac-code.git'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh 'docker build -t srinivasandhatchinamoorthy/jenkins-demo .'
+            }
+        }
+
+        stage('Login to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'USERNAME',
+                    passwordVariable: 'PASSWORD')]) {
+
+                    sh '''
+                    printf "%s" "$PASSWORD" | docker login -u "$USERNAME" --password-stdin
+                    '''
+                }
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                sh 'docker push srinivasandhatchinamoorthy/jenkins-demo'
+            }
+        }
+
+        stage('Run Container') {
+            steps {
+                sh '''
+                docker rm -f $(docker ps -aq --filter publish=4000) || true
+                docker run -d -p 4000:4000 --name jenkins-demo srinivasandhatchinamoorthy/jenkins-demo
+                '''
+            }
+        }
+
+        stage('Push Changes to GitHub') {
+            when {
+                not { buildingTag() }
+            }
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-creds',
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_PASS')]) {
+
+                    sh '''
+                    git config user.email "jenkins@company.com"
+                    git config user.name "jenkins-bot"
+
+                    echo "Build ${BUILD_NUMBER}" > build-info.txt
+
+                    git add build-info.txt
+                    git commit -m "Auto commit from Jenkins build ${BUILD_NUMBER}" || true
+
+                    git push https://$GIT_USER:$GIT_PASS@github.com/srinivasandhatchinamoorthy/project-using-iac-code.git main
+                    '''
+                }
+            }
+        }
+    }
+}
+
